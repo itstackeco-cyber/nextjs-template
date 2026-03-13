@@ -1,0 +1,38 @@
+{
+  "nav": {
+    "title": "Blog-Manager",
+    "recentPosts": "Aktuelle Beiträge",
+    "emptyState": "Noch keine Beiträge. Erstelle einen oben!"
+  },
+  "blogCard": {
+    "delete": "Löschen",
+    "deleteError": "Blogbeitrag konnte nicht gelöscht werden."
+  },
+  "toast": {
+    "success": "Erfolgreich",
+    "error": "Fehler",
+    "warning": "Warnung",
+    "info": "Info"
+  },
+  "error": {
+    "title": "Etwas ist schiefgelaufen!",
+    "description": "Ein unerwarteter Fehler ist aufgetreten. Versuche es erneut oder geh zur Startseite.",
+    "tryAgain": "Erneut versuchen",
+    "returnHome": "Zur Startseite"
+  },
+  "blogForm": {
+    "modalTitle": "Neuer Blogbeitrag",
+    "closeModal": "Dialog schließen",
+    "newBlog": "Neuer Beitrag",
+    "author": "Autor",
+    "authorPlaceholder": "Max Mustermann",
+    "title": "Titel",
+    "titlePlaceholder": "Mein toller Blog",
+    "content": "Inhalt",
+    "contentPlaceholder": "Schreib etwas...",
+    "save": "Speichern",
+    "saving": "Wird gespeichert...",
+    "successMessage": "Blogbeitrag erfolgreich erstellt!",
+    "errorMessage": "Blogbeitrag konnte nicht erstellt werden."
+  }
+}

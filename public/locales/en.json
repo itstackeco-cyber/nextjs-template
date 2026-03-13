@@ -1,0 +1,38 @@
+{
+  "nav": {
+    "title": "Blog Manager",
+    "recentPosts": "Recent Posts",
+    "emptyState": "No posts yet. Create one above!"
+  },
+  "blogCard": {
+    "delete": "Delete",
+    "deleteError": "Failed to delete blog post."
+  },
+  "toast": {
+    "success": "Success",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info"
+  },
+  "error": {
+    "title": "Something went wrong!",
+    "description": "An unexpected error occurred. You can try again or return home.",
+    "tryAgain": "Try again",
+    "returnHome": "Return home"
+  },
+  "blogForm": {
+    "modalTitle": "New Blog Post",
+    "closeModal": "Close dialog",
+    "newBlog": "New Blog",
+    "author": "Author",
+    "authorPlaceholder": "John Doe",
+    "title": "Title",
+    "titlePlaceholder": "My Awesome Blog",
+    "content": "Content",
+    "contentPlaceholder": "Write something...",
+    "save": "Save Blog",
+    "saving": "Saving...",
+    "successMessage": "Blog post created successfully!",
+    "errorMessage": "Failed to create blog post."
+  }
+}
