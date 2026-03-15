@@ -1,4 +1,4 @@
-# Next.js Blog Manager
+# Next.js Template
 
 A CRUD blog management system built with Next.js 15, Prisma, PostgreSQL, and Tailwind CSS. Follows Atomic Design, REST API routes, server actions, Axios service layer, and i18n.
 
@@ -139,7 +139,7 @@ Components are organized into atomic design levels under `src/components/`:
 | **Molecules** | `molecules/`       | `BlogCard`                                      |
 | **Organisms** | `organisms/`       | `BlogForm`, `CreateBlogButton`                  |
 | **Templates** | `templates/`       | `HomeTemplate`                                  |
-| **Pages**     | `src/app/page.tsx`  | Connects data to templates                      |
+| **Pages**     | `src/app/page.tsx` | Connects data to templates                      |
 
 ---
 
@@ -237,11 +237,11 @@ addToast({ type: "info", message: "Update available." });
 
 ### Architecture
 
-| File                              | Role                                       |
-| --------------------------------- | ------------------------------------------ |
-| `src/lib/context/AppContext.tsx`  | State provider (`addToast`, `removeToast`) |
-| `src/lib/hooks/useToast.ts`       | Hook to consume the context                |
-| `src/components/atoms/Toast.tsx`  | Renders the notification stack             |
+| File                             | Role                                       |
+| -------------------------------- | ------------------------------------------ |
+| `src/lib/context/AppContext.tsx` | State provider (`addToast`, `removeToast`) |
+| `src/lib/hooks/useToast.ts`      | Hook to consume the context                |
+| `src/components/atoms/Toast.tsx` | Renders the notification stack             |
 
 ---
 
@@ -260,7 +260,7 @@ export const API_ROUTES = {
 **`src/lib/constants/global.ts`** — shared UI/behaviour constants:
 
 ```ts
-export const COOKIE_EXPIRES_DAYS = 365;   // js-cookie expires option (1 year)
+export const COOKIE_EXPIRES_DAYS = 365; // js-cookie expires option (1 year)
 export const TOAST_AUTO_DISMISS_MS = 5_000; // Toast auto-dismiss duration
 export const BLOG_DRAFT_KEY = "blog-form-draft"; // localStorage key for form drafts
 export const UUID_REGEX = /^[0-9a-f]{8}-...-[0-9a-f]{12}$/i; // UUID validation
@@ -270,8 +270,12 @@ export const UUID_REGEX = /^[0-9a-f]{8}-...-[0-9a-f]{12}$/i; // UUID validation
 
 ```ts
 export const HTTP_STATUS = {
-  OK: 200, CREATED: 201, NO_CONTENT: 204,
-  BAD_REQUEST: 400, NOT_FOUND: 404, TOO_MANY_REQUESTS: 429,
+  OK: 200,
+  CREATED: 201,
+  NO_CONTENT: 204,
+  BAD_REQUEST: 400,
+  NOT_FOUND: 404,
+  TOO_MANY_REQUESTS: 429,
   INTERNAL_SERVER_ERROR: 500,
 } as const;
 ```
@@ -361,18 +365,18 @@ Docker container starts
 
 ### Files
 
-| File                                         | Purpose                                                            |
-| -------------------------------------------- | ------------------------------------------------------------------ |
-| `src/lib/env/server.ts`                      | Server-only vars (`DATABASE_URL`). Never sent to browser.          |
-| `src/lib/env/public.ts`                      | Public vars + `getPublicEnv()` isomorphic accessor + `Window` type |
-| `src/components/atoms/RuntimeEnvScript.tsx`  | Server component — injects public vars into `<head>`               |
+| File                                        | Purpose                                                            |
+| ------------------------------------------- | ------------------------------------------------------------------ |
+| `src/lib/env/server.ts`                     | Server-only vars (`DATABASE_URL`). Never sent to browser.          |
+| `src/lib/env/public.ts`                     | Public vars + `getPublicEnv()` isomorphic accessor + `Window` type |
+| `src/components/atoms/RuntimeEnvScript.tsx` | Server component — injects public vars into `<head>`               |
 
 ### Environment Variables
 
-| Variable               | Side   | Required | Description                                                              |
-| ---------------------- | ------ | -------- | ------------------------------------------------------------------------ |
-| `DATABASE_URL`         | Server | Yes      | PostgreSQL connection string                                             |
-| `NEXT_PUBLIC_APP_URL`  | Public | No       | Full app URL injected into the client (default: `http://localhost:3000`) |
+| Variable              | Side   | Required | Description                                                              |
+| --------------------- | ------ | -------- | ------------------------------------------------------------------------ |
+| `DATABASE_URL`        | Server | Yes      | PostgreSQL connection string                                             |
+| `NEXT_PUBLIC_APP_URL` | Public | No       | Full app URL injected into the client (default: `http://localhost:3000`) |
 
 ### Adding a new public variable
 
