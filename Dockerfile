@@ -5,6 +5,7 @@ FROM node:${NODE_VERSION} AS dependencies
 WORKDIR /app
 
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* .npmrc* ./
+COPY prisma ./prisma/
 
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
@@ -28,6 +29,8 @@ COPY . .
 
 ENV NODE_ENV=production
 # ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN npx prisma generate
 
 RUN --mount=type=cache,target=/app/.next/cache \
   if [ -f package-lock.json ]; then \

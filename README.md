@@ -1,58 +1,259 @@
 # Next.js Template
 
-A CRUD blog management system built with Next.js 15, Prisma, PostgreSQL, and Tailwind CSS. Follows Atomic Design, REST API routes, server actions, Axios service layer, and i18n.
+A full-stack Next.js application with authentication (email/password + forgot password), blog CRUD, Prisma/PostgreSQL, Tailwind CSS, and Docker support. Follows Atomic Design, REST API routes, server actions, Axios service layer, and i18n.
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Quick Start — Local Dev](#quick-start--local-dev)
+- [Quick Start — Docker (full stack)](#quick-start--docker-full-stack)
+- [Environment Variables](#environment-variables)
+- [Authentication](#authentication)
+- [Architecture Overview](#architecture-overview)
+- [Docker](#docker)
+- [API Routes](#api-routes)
+- [Server Actions](#server-actions)
+- [Security](#security)
+- [Forms](#forms-react-hook-form--zod)
+- [Toast Notifications](#toast-notifications)
+- [Internationalization](#internationalisation-i18n)
+- [Testing](#testing)
+- [Performance](#performance)
+- [Code Quality](#code-quality)
+- [Branch Naming](#branch-naming-convention)
+
+---
 
 ## Prerequisites
 
-- Node.js (v24.13.0 — see `.nvmrc`)
-- Docker (for a local PostgreSQL database)
+- Node.js v24.13.0 (see `.nvmrc`) — use `nvm use`
+- Docker & Docker Compose
 
-## Getting Started
+---
 
-1. Install dependencies:
+## Quick Start — Local Dev
 
-   ```bash
-   npm install
-   ```
+Runs PostgreSQL in Docker, the Next.js app on your machine via `npm run dev`.
 
-2. Set up environment variables — copy `.env.example` to `.env.local` and fill in the values:
+**1. Install dependencies**
 
-   ```bash
-   cp .env.example .env.local
-   ```
+```bash
+npm install
+```
 
-   ```env
-   # Server-only
-   DATABASE_URL="postgresql://johndoe:randompassword@localhost:5432/mydb"
+**2. Start PostgreSQL**
 
-   # Public runtime (injected into the browser at runtime, not build time)
-   NEXT_PUBLIC_APP_URL="http://localhost:3000"
-   ```
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
 
-3. Start the database (Docker):
+**3. Configure environment**
 
-   ```bash
-   docker run --name blog-postgres \
-     -e POSTGRES_PASSWORD=randompassword \
-     -e POSTGRES_USER=johndoe \
-     -e POSTGRES_DB=mydb \
-     -p 5432:5432 -d postgres
-   ```
+```bash
+cp .env.example .env.local
+```
 
-4. Sync the database schema:
+Fill in `.env.local`:
 
-   ```bash
-   npx prisma db push
-   npx prisma generate
-   ```
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/app_dev"
+BASE_URL="http://localhost:3000"
 
-5. Start the dev server:
+JWT_SECRET="any-random-string-minimum-32-characters-long"
+RESEND_API_KEY="re_xxxxxxxxxxxx"
+EMAIL_FROM="noreply@yourdomain.com"
+```
 
-   ```bash
-   npm run dev
-   ```
+> For testing forgot-password locally, get a free API key at [resend.com](https://resend.com). You can also leave `RESEND_API_KEY` as a placeholder and the action will return an error instead of sending an email.
 
-The app will be available at [http://localhost:3000](http://localhost:3000).
+**4. Run database migrations**
+
+```bash
+npx prisma migrate dev --name init
+```
+
+**5. Start the dev server**
+
+```bash
+npm run dev
+```
+
+App is at [http://localhost:3000](http://localhost:3000).
+
+---
+
+## Quick Start — Docker (full stack)
+
+Runs PostgreSQL + the Next.js app entirely in Docker. No local Node.js needed at runtime.
+
+**1. Start everything**
+
+```bash
+docker compose up --build
+```
+
+This will:
+1. Start PostgreSQL and wait until it is healthy
+2. Run `prisma migrate deploy` (the `migrate` service)
+3. Start the Next.js app once migrations complete
+
+App is at [http://localhost:3000](http://localhost:3000).
+
+**2. Stop**
+
+```bash
+docker compose down
+```
+
+**3. Stop and delete database data**
+
+```bash
+docker compose down -v
+```
+
+### Overriding environment variables
+
+The `docker-compose.yml` has placeholder secrets. Before sharing or deploying, override them:
+
+```bash
+JWT_SECRET="real-secret" RESEND_API_KEY="re_xxx" docker compose up --build
+```
+
+Or create a `.env` file in the project root (Docker Compose picks it up automatically):
+
+```env
+JWT_SECRET=real-secret-min-32-chars
+RESEND_API_KEY=re_xxxxxxxxxxxx
+EMAIL_FROM=noreply@yourdomain.com
+```
+
+---
+
+## Environment Variables
+
+| Variable         | Side   | Required | Description                                      |
+| ---------------- | ------ | -------- | ------------------------------------------------ |
+| `DATABASE_URL`   | Server | Yes      | PostgreSQL connection string                     |
+| `BASE_URL`       | Server | No       | Full app URL (default: `http://localhost:3000`)  |
+| `JWT_SECRET`     | Server | Yes      | Secret for signing JWT session tokens (min 32 chars) |
+| `RESEND_API_KEY` | Server | Yes      | Resend API key for sending emails                |
+| `EMAIL_FROM`     | Server | No       | From address for auth emails (default: `noreply@example.com`) |
+| `APP_URL`        | Public | No       | Injected into the browser via `window.__RUNTIME_CONFIG__` |
+
+Server-only variables are validated at startup in `src/lib/env/server.ts` — the app crashes with a clear message if any required variable is missing.
+
+---
+
+## Authentication
+
+Full email/password auth with JWT session and forgot-password flow. Google OAuth is not included but the schema is ready for it (`googleId` field).
+
+### Routes
+
+| Route                        | Description                                      |
+| ---------------------------- | ------------------------------------------------ |
+| `/register`                  | Create a new account                             |
+| `/login`                     | Sign in with email and password                  |
+| `/forgot-password`           | Request a password reset email                   |
+| `/reset-password/[token]`    | Set a new password using the token from the email |
+
+All routes under `(auth)/` are public. Everything else is protected by middleware — unauthenticated requests are redirected to `/login?from=<original-path>`.
+
+### Session
+
+Sessions are stored as **HS256 JWT tokens** in an `httpOnly` cookie named `session`. They expire after 7 days.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  createSession({ userId, email })  →  sets cookie        │
+│  getSession()                      →  verifies + returns │
+│  deleteSession()                   →  clears cookie      │
+└──────────────────────────────────────────────────────────┘
+src/lib/session.ts
+```
+
+### Forgot / Reset Password Flow
+
+```
+1. User submits email on /forgot-password
+2. Server generates rawToken = crypto.randomBytes(32).hex()
+3. tokenHash = sha256(rawToken) stored in DB with 1h expiry
+4. Email sent with link: /reset-password/<rawToken>
+5. User clicks link → rawToken is hashed → matched against DB
+6. If valid and not expired → new bcrypt hash saved, token deleted
+```
+
+The raw token is never stored in the database — only its SHA-256 hash.
+
+### Server Actions
+
+All auth logic lives in `src/lib/actions/auth.ts`:
+
+| Action                              | Description                                      |
+| ----------------------------------- | ------------------------------------------------ |
+| `registerAction(data)`              | Validate → hash password → create user → session |
+| `loginAction(data)`                 | Validate → find user → compare hash → session   |
+| `logoutAction()`                    | Delete session cookie                            |
+| `forgotPasswordAction(data)`        | Generate token → save hash → send email          |
+| `resetPasswordAction(token, data)`  | Verify token → hash new password → clear token  |
+
+### Reading the session
+
+**Server component / server action:**
+
+```ts
+import { getSession } from "@/lib/session";
+
+const session = await getSession(); // { userId, email } | null
+```
+
+**Client component:**
+
+```tsx
+import { useSession } from "@/lib/hooks/useSession";
+
+const { session, loading } = useSession();
+// session: { userId: string, email: string } | null
+```
+
+`useSession` calls `GET /api/auth/session` which reads the httpOnly cookie server-side and returns the payload.
+
+### Logout
+
+Call `logoutAction()` from any server action or a form's `action` attribute:
+
+```tsx
+import { logoutAction } from "@/lib/actions/auth";
+
+// In a server component:
+<form action={logoutAction}>
+  <button type="submit">Logout</button>
+</form>
+```
+
+### Prisma Schema
+
+```prisma
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String?
+  resetToken       String?        // SHA-256 hash of the raw token
+  resetTokenExpiry DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+```
+
+### Packages
+
+| Package     | Purpose                       |
+| ----------- | ----------------------------- |
+| `jose`      | JWT sign / verify (Edge-safe) |
+| `bcryptjs`  | Password hashing (cost 12)    |
+| `resend`    | Transactional email           |
+| `zod`       | Input validation              |
+| `crypto`    | Reset token generation (built-in Node.js) |
 
 ---
 
@@ -61,67 +262,78 @@ The app will be available at [http://localhost:3000](http://localhost:3000).
 ```
 nextjs-template/
 ├── prisma/
-│   └── schema.prisma                 # Prisma schema
-├── public/                           # Static assets (Next.js convention)
+│   └── schema.prisma                   # User + Blog models
+├── public/
 │   ├── icons/
-│   │   └── alert-triangle.svg
 │   └── locales/
-│       ├── en.json                   # English translations
-│       └── de.json                   # German translations
+│       ├── en.json
+│       └── de.json
 ├── src/
 │   ├── app/
+│   │   ├── (auth)/                     # Auth route group (no shared layout with app)
+│   │   │   ├── layout.tsx              # Centered auth shell
+│   │   │   ├── login/page.tsx
+│   │   │   ├── register/page.tsx
+│   │   │   ├── forgot-password/page.tsx
+│   │   │   └── reset-password/[token]/page.tsx
 │   │   ├── api/
+│   │   │   ├── auth/
+│   │   │   │   └── session/route.ts    # GET — returns current session payload
 │   │   │   └── blogs/
-│   │   │       ├── route.ts          # GET /api/blogs, POST /api/blogs
-│   │   │       └── [id]/route.ts     # DELETE /api/blogs/:id
-│   │   ├── error.tsx                 # Route-level error boundary
-│   │   ├── global-error.tsx          # Root-level error boundary
-│   │   ├── not-found.tsx             # 404 page
-│   │   └── page.tsx                  # Main page (force-dynamic)
+│   │   │       ├── route.ts            # GET /api/blogs, POST /api/blogs
+│   │   │       └── [id]/route.ts       # DELETE /api/blogs/:id
+│   │   ├── error.tsx
+│   │   ├── global-error.tsx
+│   │   ├── not-found.tsx
+│   │   └── page.tsx
 │   ├── components/
 │   │   ├── atoms/
-│   │   │   ├── LanguageSwitcher.tsx
-│   │   │   ├── Toast.tsx             # Toast notification component
-│   │   │   └── RuntimeEnvScript.tsx  # Injects runtime env into window
+│   │   │   ├── LanguageSwitcher/
+│   │   │   ├── Toast/
+│   │   │   └── RuntimeEnvScript/
 │   │   ├── molecules/
-│   │   │   └── BlogCard.tsx
+│   │   │   └── BlogCard/
 │   │   ├── organisms/
-│   │   │   ├── BlogForm.tsx
-│   │   │   └── CreateBlogButton.tsx
+│   │   │   ├── BlogForm/
+│   │   │   ├── CreateBlogButton/
+│   │   │   ├── LoginForm/              # email + password + forgot link
+│   │   │   ├── RegisterForm/           # email + password + confirm
+│   │   │   ├── ForgotPasswordForm/     # email input + success state
+│   │   │   └── ResetPasswordForm/      # new password + confirm + success state
 │   │   └── templates/
-│   │       └── HomeTemplate.tsx
+│   │       └── HomeTemplate/
 │   ├── i18n/
-│   │   └── request.ts                # next-intl server config (cookie-based)
+│   │   └── request.ts
 │   ├── lib/
 │   │   ├── actions/
-│   │   │   └── blog.ts               # Server action: createBlogAction
+│   │   │   ├── auth.ts                 # register, login, logout, forgotPassword, resetPassword
+│   │   │   ├── blog.ts
+│   │   │   └── index.ts
 │   │   ├── constants/
-│   │   │   ├── global.ts             # COOKIE_EXPIRES_DAYS, TOAST_AUTO_DISMISS_MS, BLOG_DRAFT_KEY, UUID_REGEX
-│   │   │   ├── http.ts               # HTTP_STATUS codes
-│   │   │   └── index.ts              # API_ROUTES
 │   │   ├── context/
-│   │   │   └── AppContext.tsx        # AppProvider (toast state)
+│   │   │   └── AppContext.tsx
 │   │   ├── env/
-│   │   │   ├── server.ts             # Server-only env vars (DATABASE_URL)
-│   │   │   └── public.ts             # Public runtime env + window.__RUNTIME_CONFIG__ type
+│   │   │   ├── server.ts               # DATABASE_URL, JWT_SECRET, RESEND_API_KEY, EMAIL_FROM
+│   │   │   └── public.ts
 │   │   ├── hooks/
-│   │   │   ├── useFormDraft.ts       # Generic localStorage form draft hook
-│   │   │   └── useToast.ts           # Hook to access toast context
+│   │   │   ├── useFormDraft.ts
+│   │   │   ├── useSession.ts           # Client hook — fetches /api/auth/session
+│   │   │   ├── useToast.ts
+│   │   │   └── index.ts
 │   │   ├── services/
-│   │   │   ├── base.service.ts       # Generic CRUD BaseService
-│   │   │   └── blog.service.ts       # BlogService extending BaseService
 │   │   ├── types/
-│   │   │   └── index.ts              # Shared TypeScript types (Blog, Toast, etc.)
 │   │   ├── utils/
-│   │   │   ├── base-url.ts           # getBaseUrl() utility
-│   │   │   ├── url.ts                # isSafeUrl / safeUrl — URL injection prevention
-│   │   │   └── rate-limit.ts         # In-memory sliding-window rate limiter
-│   │   ├── axios.ts                  # Axios instance with interceptors
-│   │   ├── prisma.ts                 # Prisma client singleton
-│   │   └── schemas.ts                # Zod validation schemas
-│   └── proxy.ts                      # CSP nonce generation (runs on every request)
-├── __mocks__/                        # Jest manual mocks
-├── .env.example                      # Environment variable template
+│   │   ├── axios.ts
+│   │   ├── prisma.ts
+│   │   ├── schemas.ts                  # Blog + auth Zod schemas
+│   │   └── session.ts                  # createSession / getSession / deleteSession
+│   ├── middleware.ts                   # CSP nonce + auth redirect
+│   └── proxy.ts                        # CSP header builder (used by middleware)
+├── Dockerfile
+├── docker-compose.yml                  # Full stack: db + migrate + app
+├── docker-compose.dev.yml              # Postgres only (for npm run dev)
+├── .dockerignore
+├── .env.example
 ├── next.config.ts
 ├── tsconfig.json
 └── jest.config.js
@@ -129,17 +341,92 @@ nextjs-template/
 
 ---
 
+## Docker
+
+### Files
+
+| File                     | Purpose                                                  |
+| ------------------------ | -------------------------------------------------------- |
+| `Dockerfile`             | 3-stage build: `dependencies` → `builder` → `runner`    |
+| `docker-compose.yml`     | Full stack — db + migrate service + app                  |
+| `docker-compose.dev.yml` | Postgres only — for use alongside `npm run dev`          |
+| `.dockerignore`          | Excludes `node_modules`, `.env`, `.next`, etc.           |
+
+### Dockerfile stages
+
+```
+dependencies  — npm ci (installs all deps, copies prisma schema)
+     │
+builder       — prisma generate + next build (standalone output)
+     │
+runner        — copies .next/standalone + .next/static + public
+                runs as non-root user (node)
+```
+
+The `output: "standalone"` in `next.config.ts` produces a self-contained `server.js` with only the minimum Node.js code needed — no `node_modules` in the runner image.
+
+### docker-compose services
+
+```
+db       — postgres:16-alpine, healthcheck, persistent volume
+migrate  — builder stage, runs: npx prisma migrate deploy
+app      — runner stage, starts after migrate completes
+```
+
+The `migrate` service uses the `builder` stage (which has Prisma CLI and all deps) to run `prisma migrate deploy` against the database. The `app` service depends on `migrate: service_completed_successfully` so the app only starts after migrations are applied.
+
+### Useful commands
+
+```bash
+# First start (or after schema changes)
+docker compose up --build
+
+# Subsequent starts (no rebuild)
+docker compose up
+
+# View logs
+docker compose logs -f app
+docker compose logs -f migrate
+
+# Rebuild only the app image
+docker compose build app
+
+# Stop
+docker compose down
+
+# Stop and wipe database
+docker compose down -v
+
+# Open a psql shell
+docker compose exec db psql -U postgres -d app_dev
+```
+
+### Adding a new migration in Docker workflow
+
+1. Change `prisma/schema.prisma`
+2. Generate a migration locally:
+   ```bash
+   npx prisma migrate dev --name your_migration_name
+   ```
+3. Rebuild and restart:
+   ```bash
+   docker compose up --build
+   ```
+   The `migrate` service will apply the new migration automatically.
+
+---
+
 ## Project Structure: Atomic Design
 
 Components are organized into atomic design levels under `src/components/`:
 
-| Level         | Folder             | Examples                                        |
-| ------------- | ------------------ | ----------------------------------------------- |
-| **Atoms**     | `atoms/`           | `LanguageSwitcher`, `Toast`, `RuntimeEnvScript` |
-| **Molecules** | `molecules/`       | `BlogCard`                                      |
-| **Organisms** | `organisms/`       | `BlogForm`, `CreateBlogButton`                  |
-| **Templates** | `templates/`       | `HomeTemplate`                                  |
-| **Pages**     | `src/app/page.tsx` | Connects data to templates                      |
+| Level         | Folder             | Examples                                                              |
+| ------------- | ------------------ | --------------------------------------------------------------------- |
+| **Atoms**     | `atoms/`           | `LanguageSwitcher`, `Toast`, `RuntimeEnvScript`                       |
+| **Molecules** | `molecules/`       | `BlogCard`                                                            |
+| **Organisms** | `organisms/`       | `BlogForm`, `LoginForm`, `RegisterForm`, `ForgotPasswordForm`, `ResetPasswordForm` |
+| **Templates** | `templates/`       | `HomeTemplate`                                                        |
+| **Pages**     | `src/app/`         | Connects data to templates                                            |
 
 ---
 
@@ -147,23 +434,30 @@ Components are organized into atomic design levels under `src/components/`:
 
 ```
 Browser
-  └── Client Components (BlogCard, BlogForm, CreateBlogButton)
-        ├── blogService.delete()  ─────────────────────────────┐
-        └── createBlogAction() (Server Action)                  │
-              └── blogService.create()  ──────────────────────┐ │
-                                                              ↓ ↓
-                                               Next.js API Routes (/api/blogs)
-                                                    └── Prisma → PostgreSQL
+  └── Client Components
+        ├── loginAction() / registerAction()  →  createSession()  →  httpOnly cookie
+        ├── blogService.delete()  ──────────────────────────────────────────────────┐
+        └── createBlogAction() (Server Action)                                      │
+              └── blogService.create()  ─────────────────────────────────────────┐  │
+                                                                                 ↓  ↓
+                                                              Next.js API Routes (/api/*)
+                                                                   └── Prisma → PostgreSQL
 ```
 
 - **Client components** never call Prisma directly
-- **API routes** are the only place Prisma is used
-- **Server actions** call API routes via `blogService` (Axios)
-- **Server components** (`page.tsx`) also call API routes via `blogService`
+- **Auth server actions** call `createSession` / `deleteSession` directly (no API round-trip)
+- **Blog server actions** call API routes via `blogService` (Axios)
+- **Middleware** verifies the JWT on every request (Edge runtime — uses `jose`, not `bcryptjs`)
 
 ---
 
 ## API Routes
+
+### `GET /api/auth/session`
+
+Returns the current user's session payload. Used by `useSession()` hook.
+
+**Response:** `{ userId: string, email: string }` or `null` with `401`.
 
 ### `GET /api/blogs`
 
@@ -171,18 +465,13 @@ Returns all blog posts ordered by `createdAt` descending.
 
 ### `POST /api/blogs`
 
-Creates a new blog post. Validates body with Zod schema. Calls `revalidatePath("/")`.
+Creates a new blog post. Validates body with Zod schema.
 
-**Body:**
-
-```json
-{ "title": "string", "content": "string", "author": "string" }
-```
+**Body:** `{ "title": "string", "content": "string", "author": "string" }`
 
 ### `DELETE /api/blogs/:id`
 
-Deletes a blog post by ID. Returns `204 No Content`. Calls `revalidatePath("/")`.
-Returns `404` if the post does not exist.
+Deletes a blog post by ID. Returns `204 No Content` or `404`.
 
 All routes return `500` with `{ error: string }` on unexpected errors.
 
@@ -190,11 +479,19 @@ All routes return `500` with `{ error: string }` on unexpected errors.
 
 ## Server Actions
 
-`src/lib/actions/blog.ts` — `createBlogAction(data: BlogSchema)`
+### Auth (`src/lib/actions/auth.ts`)
 
-- Validates input with Zod
-- Calls `blogService.create()` → `POST /api/blogs`
-- Returns `{ success: boolean; error?: string }`
+| Action | Returns | Description |
+| ------ | ------- | ----------- |
+| `registerAction(data: RegisterSchema)` | `{ success, error? }` | Hash password → create User → set session cookie |
+| `loginAction(data: LoginSchema)` | `{ success, error? }` | Find user → compare bcrypt → set session cookie |
+| `logoutAction()` | `void` | Delete session cookie |
+| `forgotPasswordAction(data)` | `{ success, error? }` | Generate token → store SHA-256 hash → send email via Resend |
+| `resetPasswordAction(token, data)` | `{ success, error? }` | Verify token + expiry → hash new password → clear token |
+
+### Blog (`src/lib/actions/blog.ts`)
+
+`createBlogAction(data: BlogSchema)` — validates input, calls `blogService.create()`.
 
 ---
 
@@ -209,212 +506,18 @@ All routes return `500` with `{ error: string }` on unexpected errors.
 
 ---
 
-## Toast Notifications
-
-A lightweight, accessible toast system built with React Context and Tailwind CSS.
-
-### Usage
-
-```tsx
-import { useToast } from "@/lib/hooks/useToast";
-
-const { addToast } = useToast();
-
-addToast({ type: "success", message: "Saved!" });
-addToast({ type: "error", message: "Something went wrong." });
-addToast({ type: "warning", message: "Check your input." });
-addToast({ type: "info", message: "Update available." });
-```
-
-### Features
-
-- 4 variants: `success`, `error`, `warning`, `info`
-- Slide-in animation on mount, fade-out on dismiss
-- Auto-dismisses after 6 seconds
-- Manual close button
-- Accessible: `role="alert"` + `aria-live="polite"`
-- Translated titles via `next-intl` (`public/locales/*.json` → `toast.*`)
-
-### Architecture
-
-| File                             | Role                                       |
-| -------------------------------- | ------------------------------------------ |
-| `src/lib/context/AppContext.tsx` | State provider (`addToast`, `removeToast`) |
-| `src/lib/hooks/useToast.ts`      | Hook to consume the context                |
-| `src/components/atoms/Toast.tsx` | Renders the notification stack             |
-
----
-
-## Constants
-
-Constants are split into two files:
-
-**`src/lib/constants/index.ts`** — API route paths:
-
-```ts
-export const API_ROUTES = {
-  blogs: "/api/blogs",
-} as const;
-```
-
-**`src/lib/constants/global.ts`** — shared UI/behaviour constants:
-
-```ts
-export const COOKIE_EXPIRES_DAYS = 365; // js-cookie expires option (1 year)
-export const TOAST_AUTO_DISMISS_MS = 5_000; // Toast auto-dismiss duration
-export const BLOG_DRAFT_KEY = "blog-form-draft"; // localStorage key for form drafts
-export const UUID_REGEX = /^[0-9a-f]{8}-...-[0-9a-f]{12}$/i; // UUID validation
-```
-
-**`src/lib/constants/http.ts`** — HTTP status codes:
-
-```ts
-export const HTTP_STATUS = {
-  OK: 200,
-  CREATED: 201,
-  NO_CONTENT: 204,
-  BAD_REQUEST: 400,
-  NOT_FOUND: 404,
-  TOO_MANY_REQUESTS: 429,
-  INTERNAL_SERVER_ERROR: 500,
-} as const;
-```
-
-Add new constants here instead of hardcoding magic strings or numbers in components.
-
----
-
-## HTTP Client: Axios + BaseService
-
-### Axios Instance (`src/lib/axios.ts`)
-
-- `baseURL`: full `NEXT_PUBLIC_APP_URL` server-side (read from runtime env), relative on client
-- 10-second timeout
-- Response interceptor extracts error messages from API responses
-
-### BaseService (`src/lib/services/base.service.ts`)
-
-Generic class with full CRUD:
-
-```ts
-class BaseService<TEntity, TCreate, TUpdate> {
-  getAll(config?); // GET /endpoint
-  getById(id, config?); // GET /endpoint/:id
-  create(payload, config?); // POST /endpoint
-  update(id, payload, config?); // PATCH /endpoint/:id
-  delete(id, config?); // DELETE /endpoint/:id
-}
-```
-
-### BlogService (`src/lib/services/blog.service.ts`)
-
-```ts
-class BlogService extends BaseService<Blog, BlogSchema> {
-  constructor() {
-    super(API_ROUTES.blogs);
-  }
-}
-export const blogService = new BlogService();
-```
-
----
-
-## Forms: react-hook-form + Zod
-
-Forms use `react-hook-form` with Zod validation via `zodResolver`.
-
-**Schema** (`src/lib/schemas.ts`):
-
-```ts
-export const blogSchema = z.object({
-  author: z.string().min(2).max(100).trim(),
-  title: z.string().min(2).max(200).trim(),
-  content: z.string().min(10).max(10_000).trim(),
-});
-```
-
----
-
-## Custom Hook: useFormDraft
-
-`src/lib/hooks/useFormDraft.ts` — persists form state in `localStorage` so drafts survive page refreshes.
-
-```ts
-const { clearDraft } = useFormDraft(DRAFT_KEY, watch, reset);
-```
-
-- On mount: loads saved draft via `reset()`
-- On change: saves to `localStorage` via `watch()` subscription (no re-renders)
-- `clearDraft()`: removes draft after successful submit
-
----
-
-## Runtime Environment Variables (Docker)
-
-This project uses a **Build Once, Deploy Anywhere** pattern — environment variables are **not** baked into the bundle at build time. Instead, public vars are injected into `window.__RUNTIME_CONFIG__` at runtime by a server component.
-
-### How it works
-
-```
-Docker container starts
-  └── Next.js server reads process.env
-        └── <RuntimeEnvScript /> renders in <head>:
-              <script>window.__RUNTIME_CONFIG__ = { APP_URL: "..." };</script>
-                    └── Client JS reads window.__RUNTIME_CONFIG__ via getPublicEnv()
-```
-
-### Files
-
-| File                                        | Purpose                                                            |
-| ------------------------------------------- | ------------------------------------------------------------------ |
-| `src/lib/env/server.ts`                     | Server-only vars (`DATABASE_URL`). Never sent to browser.          |
-| `src/lib/env/public.ts`                     | Public vars + `getPublicEnv()` isomorphic accessor + `Window` type |
-| `src/components/atoms/RuntimeEnvScript.tsx` | Server component — injects public vars into `<head>`               |
-
-### Environment Variables
-
-| Variable              | Side   | Required | Description                                                              |
-| --------------------- | ------ | -------- | ------------------------------------------------------------------------ |
-| `DATABASE_URL`        | Server | Yes      | PostgreSQL connection string                                             |
-| `NEXT_PUBLIC_APP_URL` | Public | No       | Full app URL injected into the client (default: `http://localhost:3000`) |
-
-### Adding a new public variable
-
-1. Add the variable to `PublicEnv` interface in `src/lib/env/public.ts`
-2. Add it to `getPublicEnvForRuntime()` return object
-3. Pass it to your container at runtime — no rebuild required
-
-### Docker example
-
-```dockerfile
-FROM node:18-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN npm ci && npm run build
-
-FROM node:18-alpine AS runner
-WORKDIR /app
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
-EXPOSE 3000
-CMD ["node", "server.js"]
-```
-
-```bash
-docker run -p 3000:3000 \
-  -e DATABASE_URL="postgresql://..." \
-  -e NEXT_PUBLIC_APP_URL="https://myapp.com" \
-  myapp:latest
-```
-
----
-
 ## Security
 
-### HTTP Security Headers
+### Authentication Security
 
-Configured in `next.config.ts`, applied to every response:
+- Passwords hashed with **bcrypt cost 12**
+- Reset tokens: raw token sent in email, only **SHA-256 hash** stored in DB
+- Reset tokens expire after **1 hour**
+- Forgot password action returns `success: true` even when email not found (prevents email enumeration)
+- JWT signed with **HS256**, stored in **httpOnly** cookie (inaccessible to JavaScript)
+- Middleware runs JWT verification in **Edge runtime** using `jose` (not `bcryptjs`)
+
+### HTTP Security Headers
 
 | Header                      | Value                                          | Purpose                          |
 | --------------------------- | ---------------------------------------------- | -------------------------------- |
@@ -426,65 +529,30 @@ Configured in `next.config.ts`, applied to every response:
 
 ### Content Security Policy (CSP) with Nonces
 
-`src/proxy.ts` runs on every request and:
+`src/proxy.ts` runs on every request (via `src/middleware.ts`) and:
 
 1. Generates a cryptographically random nonce (`crypto.getRandomValues`)
 2. Sets a `Content-Security-Policy` header scoped to that nonce
 3. Forwards the nonce to the layout via the `x-nonce` request header
 
-`src/app/layout.tsx` reads the nonce and passes it to `<RuntimeEnvScript nonce={nonce} />`.
-
 **Production CSP:**
 
 ```
-default-src 'self';
-script-src 'self' 'nonce-{nonce}';
-style-src 'self' 'unsafe-inline';
-img-src 'self' data:;
-font-src 'self';
-connect-src 'self';
-frame-ancestors 'none';
-form-action 'self';
-base-uri 'self';
-object-src 'none';
+default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'unsafe-inline';
+img-src 'self' data: blob:; font-src 'self'; connect-src 'self';
+frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none';
 upgrade-insecure-requests;
 ```
 
 **Development CSP** also adds `'unsafe-eval' 'unsafe-inline'` to `script-src` for Next.js HMR.
 
-### RuntimeEnvScript — XSS Prevention
-
-`JSON.stringify` alone does not escape `<`, `>`, or `&`, which allows a malicious env value to break out of a `<script>` tag. The component escapes these characters before embedding:
-
-```ts
-const json = JSON.stringify(config)
-  .replace(/</g, "\\u003c")
-  .replace(/>/g, "\\u003e")
-  .replace(/&/g, "\\u0026");
-```
-
 ### Input Validation
 
-- All API bodies are validated with **Zod** before touching the database
-- Schemas enforce `min` + `max` lengths and `.trim()` — prevents oversized payload / DoS:
-  - `author`: 2–100 chars
-  - `title`: 2–200 chars
-  - `content`: 10–10 000 chars
-- Data is always read from `request.json()` — **never from URL params**
-
-### ID Validation
-
-The `DELETE /api/blogs/:id` route validates the `id` against a UUID regex before querying the database, returning `400` for malformed input:
-
-```ts
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-...-[0-9a-f]{12}$/i;
-if (!UUID_REGEX.test(id))
-  return NextResponse.json({ error: "Invalid ID format" }, { status: 400 });
-```
+All auth and blog inputs are validated with **Zod** before touching the database. Auth schemas enforce email format, password min 8 / max 100 chars, and matching password confirmation.
 
 ### Rate Limiting
 
-`src/lib/utils/rate-limit.ts` implements a sliding-window in-memory rate limiter applied to all API routes. Returns `429 Too Many Requests` when exceeded.
+`src/lib/utils/rate-limit.ts` — sliding-window in-memory limiter on API routes.
 
 | Route                   | Limit        |
 | ----------------------- | ------------ |
@@ -492,44 +560,125 @@ if (!UUID_REGEX.test(id))
 | `POST /api/blogs`       | 20 / minute  |
 | `DELETE /api/blogs/:id` | 30 / minute  |
 
-> **Note:** The in-memory limiter works per process. For multi-instance deployments replace with a Redis-backed solution (e.g. `@upstash/ratelimit`).
-
-### URL Validation
-
-`src/lib/utils/url.ts` provides helpers to prevent `javascript:` and `data:` URL injection:
-
-```tsx
-import { isSafeUrl, safeUrl } from "@/lib/utils/url";
-
-// Guard a dynamic href
-<a href={safeUrl(userProvidedUrl)}>Link</a>;
-
-// Check programmatically
-if (!isSafeUrl(url)) throw new Error("Unsafe URL");
-```
-
-Only `https:` and `http:` protocols are allowed. All others return `false` / fallback.
+> For multi-instance deployments replace with a Redis-backed solution (e.g. `@upstash/ratelimit`).
 
 ### ESLint Security Plugin
 
-`eslint-plugin-security` is configured in `eslint.config.mjs` and runs as part of `npm run lint`. It detects:
+`eslint-plugin-security` runs as part of `npm run lint` and detects ReDoS-vulnerable regex, dynamic eval, unsafe Buffer usage, missing CSRF protection, and more.
 
-| Rule                                    | Severity | Detects                                      |
-| --------------------------------------- | -------- | -------------------------------------------- |
-| `detect-unsafe-regex`                   | error    | ReDoS-vulnerable regular expressions         |
-| `detect-eval-with-expression`           | error    | `eval()` with dynamic input                  |
-| `detect-new-buffer`                     | error    | Unsafe `new Buffer()` usage                  |
-| `detect-pseudoRandomBytes`              | error    | `crypto.pseudoRandomBytes` (deprecated/weak) |
-| `detect-disable-mustache-escape`        | error    | Disabled template escaping                   |
-| `detect-no-csrf-before-method-override` | error    | Missing CSRF protection                      |
-| `detect-object-injection`               | warn     | Bracket notation with user input             |
-| `detect-non-literal-regexp`             | warn     | Dynamic RegExp construction                  |
-| `detect-child-process`                  | warn     | `child_process` usage                        |
-| `detect-possible-timing-attacks`        | warn     | String comparison timing vulnerabilities     |
+---
 
-### Security Tests
+## Forms: react-hook-form + Zod
 
-Security-focused unit tests live alongside their modules:
+Forms use `react-hook-form` with `zodResolver`. All schemas are in `src/lib/schemas.ts`.
+
+```ts
+// Auth schemas
+registerSchema      // email, password (min 8), confirmPassword (must match)
+loginSchema         // email, password
+forgotPasswordSchema // email
+resetPasswordSchema // password (min 8), confirmPassword (must match)
+
+// Blog schema
+blogSchema          // author (2-100), title (2-200), content (10-10000)
+```
+
+---
+
+## Toast Notifications
+
+```tsx
+import { useToast } from "@/lib/hooks/useToast";
+
+const { addToast } = useToast();
+
+addToast({ type: "success", message: "Account created!" });
+addToast({ type: "error", message: "Invalid credentials." });
+addToast({ type: "warning", message: "Session expiring soon." });
+addToast({ type: "info", message: "Update available." });
+```
+
+- 4 variants: `success`, `error`, `warning`, `info`
+- Auto-dismisses after 6 seconds, manual close button
+- `role="alert"` + `aria-live="polite"` for accessibility
+- Translated titles via `next-intl`
+
+---
+
+## Custom Hook: useFormDraft
+
+Persists form state in `localStorage` so drafts survive page refreshes.
+
+```ts
+const { clearDraft } = useFormDraft(DRAFT_KEY, watch, reset);
+// On mount: loads saved draft
+// On change: saves to localStorage (no re-renders)
+// clearDraft(): removes draft after successful submit
+```
+
+---
+
+## Runtime Environment Variables (Docker)
+
+**Build Once, Deploy Anywhere** — public vars are injected into `window.__RUNTIME_CONFIG__` at runtime, not baked into the bundle at build time.
+
+```
+Docker container starts
+  └── Next.js server reads process.env
+        └── <RuntimeEnvScript /> renders in <head>:
+              <script>window.__RUNTIME_CONFIG__ = { APP_URL: "..." };</script>
+                    └── Client JS reads via getPublicEnv()
+```
+
+### Adding a new public variable
+
+1. Add to `PublicEnv` interface in `src/lib/env/public.ts`
+2. Add to `getPublicEnvForRuntime()` return object
+3. Pass it to the container at runtime — no rebuild required
+
+---
+
+## Internationalisation (i18n)
+
+Uses [`next-intl`](https://next-intl-docs.vercel.app/) with **cookie-based locale** (no URL changes).
+
+| Code | Language |
+| ---- | -------- |
+| `en` | English  |
+| `de` | Deutsch  |
+
+`src/i18n/request.ts` reads the `NEXT_LOCALE` cookie (falls back to `"en"`). Messages are loaded from `public/locales/{locale}.json`.
+
+**Usage:**
+
+```ts
+// Server component
+const t = await getTranslations("nav");
+
+// Client component
+const t = useTranslations("blogCard");
+```
+
+**Adding a language:** add `public/locales/{code}.json` + add to the `languages` array in `LanguageSwitcher.tsx`.
+
+---
+
+## HTTP Client: Axios + BaseService
+
+- `src/lib/axios.ts` — Axios instance with 10s timeout, error message extraction
+- `src/lib/services/base.service.ts` — generic `getAll / getById / create / update / delete`
+- `src/lib/services/blog.service.ts` — `BlogService extends BaseService`
+
+---
+
+## Testing
+
+```bash
+npm test
+npm run test:watch
+```
+
+Uses **Jest** with `ts-jest` and `@testing-library/react`. Security-focused tests:
 
 | File                                         | Tests                                            |
 | -------------------------------------------- | ------------------------------------------------ |
@@ -539,230 +688,23 @@ Security-focused unit tests live alongside their modules:
 
 ---
 
-## Accessibility (a11y)
-
-This project follows WCAG 2.1 AA guidelines. Key implementations:
-
-### Semantic HTML Landmarks
-
-| Element    | Location        | Purpose                                      |
-| ---------- | --------------- | -------------------------------------------- |
-| `<header>` | `HomeTemplate`  | Site header with title and language switcher |
-| `<main>`   | `HomeTemplate`  | Primary page content (blog list)             |
-| `<main>`   | `error.tsx`     | Error page content                           |
-| `<main>`   | `not-found.tsx` | 404 page content                             |
-
-### Dialog (Modal) Accessibility
-
-`CreateBlogButton` implements full dialog a11y:
-
-- `role="dialog"` + `aria-modal="true"` on the modal container
-- `aria-labelledby` pointing to the modal heading (`id="blog-modal-title"`)
-- `aria-expanded` + `aria-haspopup="dialog"` on the trigger button
-- **Keyboard**: `Escape` closes the dialog
-- **Backdrop**: clicking outside closes the dialog
-- **Focus management**: focus moves into the dialog on open, returns to the trigger button on close
-
-### Form Accessibility
-
-`BlogForm` uses proper label/input association:
-
-```tsx
-<label htmlFor="author">Author</label>
-<input id="author" {...register("author")} />
-```
-
-All three fields (`author`, `title`, `content`) have matching `htmlFor` / `id` pairs.
-
-`LanguageSwitcher` select has an explicit `aria-label="Select language"`.
-
-### Decorative Icons
-
-All Lucide icons used for visual decoration alongside text are marked `aria-hidden="true"` so screen readers skip them:
-
-```tsx
-<BookOpen size={22} aria-hidden="true" />
-```
-
-Icon-only interactive elements use `aria-label`:
-
-```tsx
-<button aria-label={t("delete")}><Trash2 /></button>
-<button aria-label={t("closeModal")}><X /></button>
-```
-
-### Toast Notifications
-
-Toasts use `role="alert"` and `aria-live="polite"` so assistive technologies announce new notifications without disrupting reading flow.
-
-### Heading Hierarchy
-
-| Page / Component   | Heading level | Text                  |
-| ------------------ | ------------- | --------------------- |
-| `page.tsx`         | `<h1>`        | Blog Manager          |
-| `page.tsx`         | `<h2>`        | Recent Posts          |
-| `CreateBlogButton` | `<h2>`        | New Blog Post (modal) |
-| `error.tsx`        | `<h1>`        | Something went wrong! |
-| `not-found.tsx`    | `<h1>`        | Page not found        |
-| `global-error.tsx` | `<h1>`        | Something went wrong! |
-
----
-
-## Internationalisation (i18n)
-
-Uses [`next-intl`](https://next-intl-docs.vercel.app/) with **cookie-based locale** (no URL changes).
-
-### Supported Languages
-
-| Code | Language |
-| ---- | -------- |
-| `en` | English  |
-| `de` | Deutsch  |
-
-### How It Works
-
-1. `src/i18n/request.ts` reads the `NEXT_LOCALE` cookie (falls back to `"en"`)
-2. Messages are loaded from `public/locales/{locale}.json`
-3. `src/app/layout.tsx` wraps the app in `NextIntlClientProvider`
-4. `LanguageSwitcher` atom sets the `NEXT_LOCALE` cookie via [`js-cookie`](https://github.com/js-cookie/js-cookie) with `SameSite=Strict; Secure` flags and calls `router.refresh()`
-
-### Usage in Components
-
-**Server components:**
-
-```ts
-import { getTranslations } from "next-intl/server";
-const t = await getTranslations("nav");
-t("title");
-```
-
-**Client components:**
-
-```ts
-import { useTranslations } from "next-intl";
-const t = useTranslations("blogCard");
-t("delete");
-```
-
-### Adding a New Language
-
-1. Add a new file `public/locales/{code}.json` matching the structure of `en.json`
-2. Add the language to the `languages` array in `LanguageSwitcher.tsx`
-
----
-
-## Icons
-
-Uses [lucide-react](https://lucide.dev/icons).
-
-```tsx
-import { Trash2, User, Calendar } from "lucide-react";
-
-<Trash2 size={16} className="text-gray-400" />;
-```
-
-| Prop          | Type             | Default        |
-| ------------- | ---------------- | -------------- |
-| `size`        | number \| string | 24             |
-| `color`       | string           | `currentColor` |
-| `strokeWidth` | number           | 2              |
-| `className`   | string           | —              |
-
----
-
-## UI Stack
-
-- **Tailwind CSS v4** — utility-first styling
-- **Theme** configured inline in `src/app/globals.css` via `@theme` block
-- **Dark mode** supported via CSS variables (`prefers-color-scheme`)
-
----
-
-## State Management
-
-- **Server state**: fetched in server components via `blogService.getAll()`
-- **UI state**: local component state (`useState`)
-- **Form drafts**: `localStorage` via `useFormDraft` hook
-- **Toasts**: React Context via `AppProvider` + `useToast`
-- **Locale**: `NEXT_LOCALE` cookie (readable on both server and client)
-
----
-
-## Testing
-
-Uses **Jest** with `ts-jest` and `@testing-library/react`.
-
-```bash
-npm test
-```
-
-### Notes
-
-- `next-intl` is ESM — mocked via `moduleNameMapper` in `jest.config.js`
-- Async server components (e.g. `HomeTemplate`) are mocked in page tests
-- Test IDs for QA automation:
-
-```tsx
-<button data-testid="your_test_id_here" />
-```
-
----
-
 ## Performance
 
-### CSS Bundle — Tailwind v4 Cleanup
+### Standalone Docker Build
 
-`src/app/globals.css` only defines custom design tokens. All standard Tailwind color utilities (`gray`, `indigo`, `red`, etc.) are provided automatically by `@import "tailwindcss"` and do not need to be redeclared. Removing ~500 lines of redundant `@theme` color variables reduces both file size and CSS output.
+`output: "standalone"` in `next.config.ts` produces a minimal `server.js` with zero `node_modules` in the production image — typically 100–200 MB vs. 500+ MB for a full install.
 
-```css
-/* ✅ Only custom tokens live here */
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-```
+### Code Splitting
 
-### Code Splitting — `next/dynamic`
-
-`BlogForm` (which pulls in `react-hook-form` + `@hookform/resolvers`) is **lazy-loaded** via `next/dynamic`. The form bundle is only downloaded when the user opens the modal for the first time, keeping it out of the initial page load.
-
-```tsx
-// CreateBlogButton.tsx
-const BlogForm = dynamic(() => import("./BlogForm"), {
-  loading: () => <Loader2 className="animate-spin" />,
-});
-```
-
-### Memoization
-
-**`React.memo`** on `BlogCard` and `ToastItem` — prevents re-render when the parent re-renders but a given item's data has not changed (e.g. a different card was deleted, or a new toast was added).
-
-**`useCallback`** is applied to event handlers that are passed as props or belong to memoized components:
-
-| Component          | Handler         | Dependency                  |
-| ------------------ | --------------- | --------------------------- |
-| `BlogCard`         | `handleDelete`  | `blog.id, router`           |
-| `CreateBlogButton` | `handleOpen`    | —                           |
-| `CreateBlogButton` | `handleClose`   | —                           |
-| `CreateBlogButton` | `handleKeyDown` | `handleClose`               |
-| `ToastItem`        | `dismiss`       | `onRemove, notification.id` |
-| `LanguageSwitcher` | `handleChange`  | `router`                    |
-
-### Compression
-
-`compress: true` in `next.config.ts` enables Gzip/Brotli for all responses. `poweredByHeader: false` removes the `X-Powered-By: Next.js` header (fewer bytes + less information exposure).
+`BlogForm` is lazy-loaded via `next/dynamic` — only downloaded when the user opens the create modal.
 
 ### Bundle Analysis
-
-Visualise the full JS bundle breakdown with an interactive treemap:
 
 ```bash
 npm run analyze
 ```
 
-Opens two reports in the browser — one for the client bundle, one for the server bundle. Use it to identify large dependencies and find further splitting opportunities.
+Opens interactive treemaps for client and server bundles.
 
 ---
 
@@ -770,26 +712,24 @@ Opens two reports in the browser — one for the client bundle, one for the serv
 
 ### Pre-commit Hook (Husky)
 
-Runs on every commit:
+Runs `npm run check` (lint + test + build) on every commit.
 
 ```bash
-npm run check  # lint + test + build
+# Initialize hooks after cloning:
+npm run prepare
 ```
 
 ### Prettier
-
-Format all files:
 
 ```bash
 npx prettier --write .
 ```
 
-Install the Prettier VS Code extension and enable **Format on Save**.
-
 ### ESLint
 
 ```bash
-npm run lint
+npm run lint       # check
+npm run lint:fix   # auto-fix
 ```
 
 ---

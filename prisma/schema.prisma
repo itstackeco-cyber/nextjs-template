@@ -7,6 +7,16 @@ datasource db {
   url      = "postgresql://johndoe:randompassword@localhost:5432/mydb?schema=public"
 }
 
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String?
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
 model Blog {
   id        String   @id @default(cuid())
   title     String

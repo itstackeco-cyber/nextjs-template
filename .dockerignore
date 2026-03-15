@@ -8,3 +8,7 @@ pnpm-debug.log
 .git
 .DS_Store
 README.md
+.env
+.env.local
+.env.*.local
+docker-compose*.yml

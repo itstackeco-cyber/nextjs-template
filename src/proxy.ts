@@ -1,7 +1,29 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { jwtVerify } from "jose";
 
 const IS_DEV = process.env.NODE_ENV === "development";
+
+const PUBLIC_ROUTES = ["/login", "/register", "/forgot-password"];
+const RESET_PASSWORD_RE = /^\/reset-password\//;
+
+function isPublicRoute(pathname: string): boolean {
+  return (
+    PUBLIC_ROUTES.some((r) => pathname.startsWith(r)) ||
+    RESET_PASSWORD_RE.test(pathname)
+  );
+}
+
+async function verifySession(token: string | undefined): Promise<boolean> {
+  if (!token) return false;
+  try {
+    const secret = new TextEncoder().encode(process.env["JWT_SECRET"]!);
+    await jwtVerify(token, secret);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function generateNonce(): string {
   const array = new Uint8Array(16);
@@ -31,7 +53,7 @@ function buildCsp(nonce: string): string {
   return directives.join("; ");
 }
 
-export function proxy(request: NextRequest) {
+function applyCsp(request: NextRequest): NextResponse {
   const nonce = generateNonce();
   const csp = buildCsp(nonce);
 
@@ -42,6 +64,32 @@ export function proxy(request: NextRequest) {
   response.headers.set("Content-Security-Policy", csp);
 
   return response;
+}
+
+export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const cspResponse = applyCsp(request);
+
+  const sessionToken = request.cookies.get("session")?.value;
+  const authenticated = await verifySession(sessionToken);
+
+  // Logged-in user visiting auth pages → redirect to home
+  if (isPublicRoute(pathname) && authenticated) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
+  // Unauthenticated user visiting protected pages → redirect to login
+  if (
+    !isPublicRoute(pathname) &&
+    !authenticated &&
+    !pathname.startsWith("/api")
+  ) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("from", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return cspResponse;
 }
 
 export const config = {

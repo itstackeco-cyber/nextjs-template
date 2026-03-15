@@ -17,4 +17,10 @@ export const serverEnv = {
   BASE_URL: process.env["BASE_URL"] ?? "http://localhost:3000",
 
   NODE_ENV: process.env["NODE_ENV"] ?? "development",
+
+  JWT_SECRET: requireEnv("JWT_SECRET", process.env["JWT_SECRET"]),
+
+  RESEND_API_KEY: requireEnv("RESEND_API_KEY", process.env["RESEND_API_KEY"]),
+
+  EMAIL_FROM: process.env["EMAIL_FROM"] ?? "noreply@example.com",
 } as const;
